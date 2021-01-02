@@ -28,10 +28,12 @@ References
        Mathematical Programming", McGraw-Hill, Chapter 4.
 """
 
-import numpy as np
 from warnings import warn
-from .optimize import OptimizeResult, OptimizeWarning, _check_unknown_options
+
+import numpy as np
+
 from ._linprog_util import _postsolve
+from .optimize import OptimizeResult, OptimizeWarning, _check_unknown_options
 
 
 def _pivot_col(T, tol=1e-9, bland=False):
@@ -212,9 +214,15 @@ def _apply_pivot(T, basis, pivrow, pivcol, tol=1e-9):
     basis[pivrow] = pivcol
     pivval = T[pivrow, pivcol]
     T[pivrow] = T[pivrow] / pivval
-    for irow in range(T.shape[0]):
-        if irow != pivrow:
-            T[irow] = T[irow] - T[pivrow] * T[irow, pivcol]
+    # Storing the pivot multiples in facts: Numbers s.t R_i - ef_i * pivval = 0
+    facts = T[:, pivcol]
+    # Constructing an elementary matrix E
+    E = np.eye(T.shape[0])
+    E[:, pivrow] = -facts
+    E[pivrow, :] = -E[pivrow, :]  # Correcting sign error
+
+    # Performing pivot operation by matrix multiplication
+    T = E @ T
 
     # The selected pivot should never lead to a pivot value less than the tol.
     if np.isclose(pivval, tol, atol=0, rtol=1e4):
@@ -225,13 +233,23 @@ def _apply_pivot(T, basis, pivrow, pivcol, tol=1e-9):
             "numerical stability of the simplex method. "
             "Removing redundant constraints, changing the pivot strategy "
             "via Bland's rule or increasing the tolerance may "
-            "help reduce the issue.".format(pivval, tol))
+            "help reduce the issue.".format(pivval, tol)
+        )
         warn(message, OptimizeWarning, stacklevel=5)
 
 
-def _solve_simplex(T, n, basis, callback, postsolve_args,
-                   maxiter=1000, tol=1e-9, phase=2, bland=False, nit0=0,
-                   ):
+def _solve_simplex(
+    T,
+    n,
+    basis,
+    callback,
+    postsolve_args,
+    maxiter=1000,
+    tol=1e-9,
+    phase=2,
+    bland=False,
+    nit0=0,
+):
     """
     Solve a linear programming problem in "standard form" using the Simplex
     Method. Linear Programming is intended to solve the following problem form:
@@ -354,13 +372,13 @@ def _solve_simplex(T, n, basis, callback, postsolve_args,
     """
     nit = nit0
     status = 0
-    message = ''
+    message = ""
     complete = False
 
     if phase == 1:
-        m = T.shape[1]-2
+        m = T.shape[1] - 2
     elif phase == 2:
-        m = T.shape[1]-1
+        m = T.shape[1] - 1
     else:
         raise ValueError("Argument 'phase' to _solve_simplex must be 1 or 2")
 
@@ -373,10 +391,10 @@ def _solve_simplex(T, n, basis, callback, postsolve_args,
         # Ref: "An Introduction to Linear Programming and Game Theory"
         # by Paul R. Thie, Gerard E. Keough, 3rd Ed,
         # Chapter 3.7 Redundant Systems (pag 102)
-        for pivrow in [row for row in range(basis.size)
-                       if basis[row] > T.shape[1] - 2]:
-            non_zero_row = [col for col in range(T.shape[1] - 1)
-                            if abs(T[pivrow, col]) > tol]
+        for pivrow in [row for row in range(basis.size) if basis[row] > T.shape[1] - 2]:
+            non_zero_row = [
+                col for col in range(T.shape[1] - 1) if abs(T[pivrow, col]) > tol
+            ]
             if len(non_zero_row) > 0:
                 pivcol = non_zero_row[0]
                 _apply_pivot(T, basis, pivrow, pivcol, tol)
@@ -385,8 +403,7 @@ def _solve_simplex(T, n, basis, callback, postsolve_args,
     if len(basis[:m]) == 0:
         solution = np.empty(T.shape[1] - 1, dtype=np.float64)
     else:
-        solution = np.empty(max(T.shape[1] - 1, max(basis[:m]) + 1),
-                            dtype=np.float64)
+        solution = np.empty(max(T.shape[1] - 1, max(basis[:m]) + 1), dtype=np.float64)
 
     while not complete:
         # Find the pivot column
@@ -407,21 +424,21 @@ def _solve_simplex(T, n, basis, callback, postsolve_args,
             solution[:] = 0
             solution[basis[:n]] = T[:n, -1]
             x = solution[:m]
-            x, fun, slack, con = _postsolve(
-                x, postsolve_args
+            x, fun, slack, con = _postsolve(x, postsolve_args)
+            res = OptimizeResult(
+                {
+                    "x": x,
+                    "fun": fun,
+                    "slack": slack,
+                    "con": con,
+                    "status": status,
+                    "message": message,
+                    "nit": nit,
+                    "success": status == 0 and complete,
+                    "phase": phase,
+                    "complete": complete,
+                }
             )
-            res = OptimizeResult({
-                'x': x,
-                'fun': fun,
-                'slack': slack,
-                'con': con,
-                'status': status,
-                'message': message,
-                'nit': nit,
-                'success': status == 0 and complete,
-                'phase': phase,
-                'complete': complete,
-                })
             callback(res)
 
         if not complete:
@@ -435,9 +452,19 @@ def _solve_simplex(T, n, basis, callback, postsolve_args,
     return nit, status
 
 
-def _linprog_simplex(c, c0, A, b, callback, postsolve_args,
-                     maxiter=1000, tol=1e-9, disp=False, bland=False,
-                     **unknown_options):
+def _linprog_simplex(
+    c,
+    c0,
+    A,
+    b,
+    callback,
+    postsolve_args,
+    maxiter=1000,
+    tol=1e-9,
+    disp=False,
+    bland=False,
+    **unknown_options
+):
     """
     Minimize a linear objective function subject to linear equality and
     non-negativity constraints using the two phase simplex method.
@@ -593,12 +620,13 @@ def _linprog_simplex(c, c0, A, b, callback, postsolve_args,
     _check_unknown_options(unknown_options)
 
     status = 0
-    messages = {0: "Optimization terminated successfully.",
-                1: "Iteration limit reached.",
-                2: "Optimization failed. Unable to find a feasible"
-                   " starting point.",
-                3: "Optimization failed. The problem appears to be unbounded.",
-                4: "Optimization failed. Singular matrix encountered."}
+    messages = {
+        0: "Optimization terminated successfully.",
+        1: "Iteration limit reached.",
+        2: "Optimization failed. Unable to find a feasible" " starting point.",
+        3: "Optimization failed. The problem appears to be unbounded.",
+        4: "Optimization failed. Singular matrix encountered.",
+    }
 
     n, m = A.shape
 
@@ -620,11 +648,17 @@ def _linprog_simplex(c, c0, A, b, callback, postsolve_args,
     row_pseudo_objective[av] = 0
     T = np.vstack((row_constraints, row_objective, row_pseudo_objective))
 
-    nit1, status = _solve_simplex(T, n, basis, callback=callback,
-                                  postsolve_args=postsolve_args,
-                                  maxiter=maxiter, tol=tol, phase=1,
-                                  bland=bland
-                                  )
+    nit1, status = _solve_simplex(
+        T,
+        n,
+        basis,
+        callback=callback,
+        postsolve_args=postsolve_args,
+        maxiter=maxiter,
+        tol=tol,
+        phase=1,
+        bland=bland,
+    )
     # if pseudo objective is zero, remove the last row from the tableau and
     # proceed to phase 2
     nit2 = nit1
@@ -648,11 +682,18 @@ def _linprog_simplex(c, c0, A, b, callback, postsolve_args,
 
     if status == 0:
         # Phase 2
-        nit2, status = _solve_simplex(T, n, basis, callback=callback,
-                                      postsolve_args=postsolve_args,
-                                      maxiter=maxiter, tol=tol, phase=2,
-                                      bland=bland, nit0=nit1
-                                      )
+        nit2, status = _solve_simplex(
+            T,
+            n,
+            basis,
+            callback=callback,
+            postsolve_args=postsolve_args,
+            maxiter=maxiter,
+            tol=tol,
+            phase=2,
+            bland=bland,
+            nit0=nit1,
+        )
 
     solution = np.zeros(n + m)
     solution[basis[:n]] = T[:n, -1]
